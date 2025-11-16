@@ -35,6 +35,9 @@ document.addEventListener('DOMContentLoaded', function() {
     let isRecording = false;
     let isProcessing = false;
     let autoRestartEnabled = true;
+    let accumulatedTranscript = '';  // Accumulate transcript across multiple final results
+    let silenceTimer = null;  // Timer to detect when user stops speaking
+    const SILENCE_DELAY = 1800;  // Wait 1.8 seconds of silence before processing (mobile-friendly)
 
     // Check browser support
     if (!SpeechRecognition) {
@@ -49,6 +52,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         recognition.onstart = function() {
             isRecording = true;
+            accumulatedTranscript = '';  // Reset accumulated transcript on start
             recordBtn.classList.add('recording');
             recordIcon.textContent = '🔴';
             recordText.textContent = 'Listening...';
@@ -71,17 +75,33 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
 
-            // Show interim results for real-time feedback
-            if (interimTranscript) {
-                userTranscript.textContent = interimTranscript;
+            // Accumulate final transcripts instead of processing immediately
+            if (finalTranscript.trim()) {
+                accumulatedTranscript += finalTranscript;
+            }
+
+            // Display current transcript (accumulated + interim)
+            const displayText = accumulatedTranscript + interimTranscript;
+            if (displayText.trim()) {
+                userTranscript.textContent = displayText.trim();
                 transcriptDisplay.classList.remove('hidden');
             }
 
-            // Process final transcript immediately
-            if (finalTranscript.trim() && !isProcessing) {
-                const finalText = finalTranscript.trim();
-                userTranscript.textContent = finalText;
-                processVoiceInput(finalText);
+            // Clear existing silence timer
+            if (silenceTimer) {
+                clearTimeout(silenceTimer);
+            }
+
+            // Set new timer - only process after user stops speaking for SILENCE_DELAY ms
+            // This prevents processing partial sentences on mobile
+            if (accumulatedTranscript.trim() && !isProcessing) {
+                silenceTimer = setTimeout(() => {
+                    if (accumulatedTranscript.trim() && !isProcessing) {
+                        const finalText = accumulatedTranscript.trim();
+                        accumulatedTranscript = '';  // Reset for next input
+                        processVoiceInput(finalText);
+                    }
+                }, SILENCE_DELAY);
             }
         };
 
@@ -166,6 +186,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function stopRecording() {
         isRecording = false;
+        accumulatedTranscript = '';  // Clear accumulated transcript
+        if (silenceTimer) {
+            clearTimeout(silenceTimer);  // Clear silence timer
+            silenceTimer = null;
+        }
         recordBtn.classList.remove('recording');
         recordIcon.textContent = '🎤';
         recordText.textContent = 'Click to Start Conversation';
@@ -176,6 +201,12 @@ document.addEventListener('DOMContentLoaded', function() {
         if (isProcessing) return; // Prevent multiple simultaneous requests
         
         isProcessing = true;
+        
+        // Clear silence timer if active
+        if (silenceTimer) {
+            clearTimeout(silenceTimer);
+            silenceTimer = null;
+        }
         
         // STOP listening to prevent feedback loop
         if (recognition && isRecording) {
@@ -269,6 +300,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 isProcessing = false;
                 
                 if (autoRestartEnabled && isRecording) {
+                    accumulatedTranscript = '';  // Reset for fresh input
                     setTimeout(() => {
                         if (autoRestartEnabled && isRecording) {
                             try {
@@ -299,6 +331,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Restart recognition if still in recording mode
             if (autoRestartEnabled && isRecording) {
+                accumulatedTranscript = '';  // Reset for fresh input after error
                 setTimeout(() => {
                     if (autoRestartEnabled && isRecording) {
                         try {
@@ -370,6 +403,11 @@ document.addEventListener('DOMContentLoaded', function() {
     clearHistoryBtn.addEventListener('click', function() {
         if (confirm('Clear all conversation history and start fresh?')) {
             conversationHistory = [];
+            accumulatedTranscript = '';  // Reset accumulated transcript
+            if (silenceTimer) {
+                clearTimeout(silenceTimer);  // Clear any pending timer
+                silenceTimer = null;
+            }
             historyList.innerHTML = '<p class="empty-history">No conversation yet. Start by clicking the microphone!</p>';
             audioContainer.classList.add('hidden');
             updateMessageCount();
